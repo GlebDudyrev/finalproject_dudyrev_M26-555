@@ -1,4 +1,5 @@
 import hmac
+import math
 from datetime import datetime
 
 from valutatrade_hub.core.utils import generate_salt, hash_password
@@ -89,3 +90,78 @@ class User:
 
         hashed_password = hash_password(password, self._salt)
         return hmac.compare_digest(hashed_password, self._hashed_password)
+
+
+class Wallet:
+    """Represent a wallet holding a single currency."""
+
+    def __init__(
+        self,
+        currency_code: str,
+    ) -> None:
+        if (
+            not isinstance(currency_code, str)
+            or not currency_code.isupper()
+            or currency_code != currency_code.strip()
+        ):
+            raise ValueError("Некорректный код валюты")
+
+        self._currency_code = currency_code
+        self._balance = 0.0
+
+    @property
+    def _currency_code(self) -> str:
+        return self._currency_code
+
+    @property
+    def balance(self) -> float:
+        return self._balance
+
+    @balance.setter
+    def balance(self, value: float) -> None:
+        self._validate_number(value)
+
+        if value < 0:
+            raise ValueError("Баланс не может быть отрицательным")
+
+        self._balance = float(value)
+
+    @staticmethod
+    def _validate_number(value: float) -> None:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+        ):
+            raise ValueError("Значение должно быть конечным числом")
+
+    @classmethod
+    def _validate_amount(cls, amount: float) -> None:
+        cls._validate_number(amount)
+
+        if amount <= 0:
+            raise ValueError("'amount' должен быть положительным числом")
+
+    def deposit(self, amount: float) -> None:
+        """Increase the wallet balance."""
+
+        self._validate_amount(amount)
+        self.balance += amount
+
+    def withdraw(self, amount: float) -> None:
+        """Decrease the wallet balance if sufficient funds are available."""
+
+        self._validate_amount(amount)
+
+        if amount > self.balance:
+            raise ValueError("Недостаточно средств")
+
+        self.balance -= amount
+
+    def get_balance_info(self) -> dict[str, str | float]:
+        """Return the wallet currency and current balance."""
+
+        return {
+            "currency_code": self.currency_code,
+            "balance": self.balance,
+        }
