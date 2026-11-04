@@ -2,7 +2,7 @@ import hmac
 import math
 from datetime import datetime
 
-from valutatrade_hub.core.utils import generate_salt, hash_password
+from valutatrade_hub.core.utils import EXCHANGE_RATES_USD, generate_salt, hash_password
 
 
 class User:
@@ -165,3 +165,75 @@ class Wallet:
             "currency_code": self.currency_code,
             "balance": self.balance,
         }
+
+
+class Portfolio:
+    """Manage the wallets belonging to a user."""
+
+    def __init__(
+        self,
+        user: User,
+        wallets: dict[str, Wallet] | None = None,
+    ) -> None:
+        if not isinstance(user, User):
+            raise TypeError("Владелец портфеля должен быть объектом User")
+
+        if wallets is not None and not isinstance(wallets, dict):
+            raise TypeError("Кошельки должны быть представлены словарём")
+
+        for currency_code, wallet in (wallets or {}).items():
+            if (
+                not isinstance(wallet, Wallet)
+                or currency_code != wallet.currency_code
+            ):
+                raise ValueError("Некорректные данные кошелька")
+
+        self._user = user
+        self._wallets = wallets.copy() if wallets is not None else {}
+
+    @property
+    def user(self) -> User:
+        return self._user
+
+    @property
+    def user_id(self) -> int:
+        return self._user.user_id
+
+    @property
+    def wallets(self) -> dict[str, Wallet]:
+        return self._wallets.copy()
+
+    def add_currency(self, currency_code: str) -> Wallet:
+        """Add a new wallet for the specified currency."""
+
+        if currency_code in self._wallets:
+            raise ValueError(f"Кошелёк '{currency_code}' уже существует")
+
+        wallet = Wallet(currency_code)
+        self._wallets[currency_code] = wallet
+
+        return wallet
+
+    def get_wallet(self, currency_code: str) -> Wallet:
+        """Return the wallet for the specified currency."""
+
+        return self._wallets[currency_code]
+
+def get_total_value(
+    self,
+    base_currency: str = "USD",
+    exchange_rates: dict[str, float] = EXCHANGE_RATES_USD,
+) -> float:
+    """Calculate the total portfolio value in the base currency."""
+
+    if base_currency not in exchange_rates:
+        raise ValueError(f"Неизвестная валюта '{base_currency}'")
+
+    base_rate = exchange_rates[base_currency]
+
+    total_usd = sum(
+        wallet.balance * exchange_rates[wallet.currency_code]
+        for wallet in self._wallets.values()
+    )
+
+    return total_usd / base_rate
