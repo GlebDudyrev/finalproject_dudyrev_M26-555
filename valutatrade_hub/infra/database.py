@@ -8,6 +8,7 @@ JSONData = TypeVar("JSONData", list, dict)
 
 class Storage(Protocol):
     """Define the interface for persistent application storage."""
+
     ...
 
 

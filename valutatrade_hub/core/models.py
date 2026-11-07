@@ -29,7 +29,7 @@ class User:
             raise TypeError("Дата регистрации должна иметь тип datetime")
 
         self._user_id = user_id
-        self._username = username
+        self.username = username
         self._hashed_password = hashed_password
         self._salt = salt
         self._registration_date = registration_date
@@ -98,6 +98,7 @@ class Wallet:
     def __init__(
         self,
         currency_code: str,
+        balance: float = 0.0,
     ) -> None:
         if (
             not isinstance(currency_code, str)
@@ -107,7 +108,7 @@ class Wallet:
             raise ValueError("Некорректный код валюты")
 
         self._currency_code = currency_code
-        self._balance = 0.0
+        self.balance = balance
 
     @property
     def currency_code(self) -> str:
@@ -182,10 +183,7 @@ class Portfolio:
             raise TypeError("Кошельки должны быть представлены словарём")
 
         for currency_code, wallet in (wallets or {}).items():
-            if (
-                not isinstance(wallet, Wallet)
-                or currency_code != wallet.currency_code
-            ):
+            if not isinstance(wallet, Wallet) or currency_code != wallet.currency_code:
                 raise ValueError("Некорректные данные кошелька")
 
         self._user = user

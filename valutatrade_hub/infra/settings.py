@@ -104,8 +104,8 @@ class AppSettings:
                 continue
 
             value = settings_values[name]
-            if not isinstance(value, str):
-                continue
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"Некорректное значение настройки '{name}'")
 
             path = Path(value).expanduser()
             if not path.is_absolute():
