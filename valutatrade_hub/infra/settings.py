@@ -1,8 +1,9 @@
-import json
 import os
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, ClassVar, Self
+
+from .utils import read_json_file
 
 APP_NAME = "valutatrade_hub"
 
@@ -159,11 +160,7 @@ class SettingsLoader:
 
     def _read_config_file(self) -> dict[str, Any]:
         """Read configuration values from JSON."""
-        try:
-            with self._config_path.open(encoding="utf-8") as file:
-                config_values = json.load(file)
-        except FileNotFoundError:
-            return {}
+        config_values = read_json_file(self._config_path, {})
 
         if not isinstance(config_values, dict):
             raise ValueError("Конфигурация должна быть объектом JSON")
