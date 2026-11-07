@@ -2,7 +2,8 @@ import argparse
 import shlex
 from typing import NoReturn
 
-from valutatrade_hub.core.usecases import UseCaseError, register
+from valutatrade_hub.core.models import User
+from valutatrade_hub.core.usecases import UseCaseError, login, register
 from valutatrade_hub.infra.database import Storage
 
 
@@ -96,8 +97,9 @@ def execute_command(
     arguments: list[str],
     parser: CommandParser,
     storage: Storage,
-) -> bool:
-    """Execute a command; return False to stop the CLI."""
+    current_user: User | None,
+) -> tuple[bool, User | None]:
+    """Execute a command and return the updated CLI state."""
     match command:
         case "register":
             args = parser.parse_args([command, *arguments])
@@ -106,23 +108,31 @@ def execute_command(
                 f"Пользователь '{user.username}' зарегистрирован (id={user.user_id})."
             )
 
-        case "login" | "show-portfolio" | "buy" | "sell" | "get-rate":
+        case "login":
+            args = parser.parse_args([command, *arguments])
+            current_user = login(args.username, args.password, storage)
+            print(f"Вы вошли как '{current_user.username}'")
+
+        case "show-portfolio" | "buy" | "sell" | "get-rate":
             parser.parse_args([command, *arguments])
             print(f"Команда '{command}' пока не реализована.")
 
         case "exit":
             parser.parse_args([command, *arguments])
-            return False
+            return False, current_user
 
         case _:
             print(f"Неизвестная команда '{command}'.")
 
-    return True
+    return True, current_user
+
 
 
 def run_cli(storage: Storage) -> None:
     """Run the interactive command-line interface."""
     parser = create_command_parser()
+
+    current_user: User | None = None
 
     print("ValutaTrade Hub")
     print("Для завершения работы введите exit.")
@@ -146,11 +156,12 @@ def run_cli(storage: Storage) -> None:
         command, *command_arguments = arguments
 
         try:
-            should_continue = execute_command(
+            should_continue, current_user = execute_command(
                 command,
                 command_arguments,
                 parser,
                 storage,
+                current_user,
             )
         except InvalidCommandArguments:
             print(f"Некорректные аргументы команды '{command}'.")
