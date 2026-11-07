@@ -69,8 +69,7 @@ class AppSettings:
 
         if self.log_format not in ("text", "json"):
             raise ValueError(
-                "log_format должен быть 'text' или 'json'"
-                f"передан: {self.log_format}"
+                f"log_format должен быть 'text' или 'json' передан: {self.log_format}"
             )
 
         for name in ("data_dir", "log_path"):
@@ -133,8 +132,7 @@ class SettingsLoader:
         if type(self)._is_initialized:
             if config_path is not None:
                 raise RuntimeError(
-                    "Путь к конфигурации можно передать "
-                    "только при первой инициализации"
+                    "Путь к конфигурации можно передать только при первой инициализации"
                 )
             return
 
