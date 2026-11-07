@@ -127,7 +127,6 @@ def execute_command(
     return True, current_user
 
 
-
 def run_cli(storage: Storage) -> None:
     """Run the interactive command-line interface."""
     parser = create_command_parser()
