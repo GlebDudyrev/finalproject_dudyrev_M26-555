@@ -15,13 +15,14 @@ def read_json_file(file_path: Path, default: T) -> T:
 
 
 def write_json_file(file_path: Path, data: object) -> None:
-    """Serialize data and write it to a JSON file."""
-    content = json.dumps(
-        data,
-        ensure_ascii=False,
-        indent=2,
-        allow_nan=False,
-    )
-
+    """Write data to a JSON file."""
     file_path.parent.mkdir(parents=True, exist_ok=True)
-    file_path.write_text(content + "\n", encoding="utf-8")
+
+    with file_path.open("w", encoding="utf-8") as file:
+        json.dump(
+            data,
+            file,
+            ensure_ascii=False,
+            indent=2,
+            allow_nan=False,
+        )
