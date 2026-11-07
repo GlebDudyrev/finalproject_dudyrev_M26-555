@@ -40,3 +40,21 @@ def register(username: str, password: str, storage: Storage) -> User:
     storage.add_portfolio(portfolio)
 
     return user
+
+
+
+def login(username: str, password: str, storage: Storage) -> User:
+    """Authenticate a user and return their account."""
+    if not isinstance(username, str) or not username.strip():
+        raise UseCaseError("Имя пользователя не может быть пустым")
+
+    username = username.strip()
+    user = storage.get_user(username)
+
+    if user is None:
+        raise UseCaseError(f"Пользователь '{username}' не найден")
+
+    if not user.verify_password(password):
+        raise UseCaseError("Неверный пароль")
+
+    return user
