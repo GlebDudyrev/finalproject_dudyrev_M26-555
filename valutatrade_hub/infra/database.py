@@ -125,13 +125,25 @@ class JsonStorage:
         self._write_json("users.json", users)
 
     def delete_user(self, user_id: int) -> None:
-        """Delete an existing user by ID."""
+        """Delete a user and their associated portfolios."""
         users = self._read_json("users.json", [])
+
         for index, data in enumerate(users):
             if data["user_id"] == user_id:
+                portfolios = self._read_json("portfolios.json", [])
+
+                portfolios = [
+                    portfolio
+                    for portfolio in portfolios
+                    if portfolio["user_id"] != user_id
+                ]
+
+                self._write_json("portfolios.json", portfolios)
+
                 users.pop(index)
                 self._write_json("users.json", users)
                 return
+
         raise ValueError(f"Пользователь с ID {user_id} не найден")
 
     # CRUD Portfolio
