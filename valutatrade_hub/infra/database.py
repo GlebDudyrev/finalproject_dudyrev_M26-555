@@ -109,10 +109,13 @@ class JsonStorage:
             for data in users
         ):
             raise ValueError(f"Имя пользователя '{user.username}' уже занято")
-        
+
         for index, data in enumerate(users):
             if data["user_id"] == user.user_id:
-                if datetime.fromisoformat(data["registration_date"]) != user.registration_date:
+                if (
+                    datetime.fromisoformat(data["registration_date"])
+                    != user.registration_date
+                ):
                     raise ValueError("Дата регистрации не может быть изменена!")
                 users[index] = self._user_to_dict(user)
                 break

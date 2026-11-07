@@ -4,7 +4,6 @@ from valutatrade_hub.core.models import Portfolio, User
 from valutatrade_hub.core.utils import generate_salt, hash_password
 from valutatrade_hub.infra.database import Storage
 
-
 INITIAL_BALANCE_USD = 1_000.0
 
 
