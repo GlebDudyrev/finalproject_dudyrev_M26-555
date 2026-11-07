@@ -110,7 +110,7 @@ class Wallet:
         self._balance = 0.0
 
     @property
-    def _currency_code(self) -> str:
+    def currency_code(self) -> str:
         return self._currency_code
 
     @property
@@ -219,21 +219,21 @@ class Portfolio:
 
         return self._wallets[currency_code]
 
-def get_total_value(
-    self,
-    base_currency: str = "USD",
-    exchange_rates: dict[str, float] = EXCHANGE_RATES_USD,
-) -> float:
-    """Calculate the total portfolio value in the base currency."""
+    def get_total_value(
+        self,
+        base_currency: str = "USD",
+        exchange_rates: dict[str, float] = EXCHANGE_RATES_USD,
+    ) -> float:
+        """Calculate the total portfolio value in the base currency."""
 
-    if base_currency not in exchange_rates:
-        raise ValueError(f"Неизвестная валюта '{base_currency}'")
+        if base_currency not in exchange_rates:
+            raise ValueError(f"Неизвестная валюта '{base_currency}'")
 
-    base_rate = exchange_rates[base_currency]
+        base_rate = exchange_rates[base_currency]
 
-    total_usd = sum(
-        wallet.balance * exchange_rates[wallet.currency_code]
-        for wallet in self._wallets.values()
-    )
+        total_usd = sum(
+            wallet.balance * exchange_rates[wallet.currency_code]
+            for wallet in self._wallets.values()
+        )
 
-    return total_usd / base_rate
+        return total_usd / base_rate
