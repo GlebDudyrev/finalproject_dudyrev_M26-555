@@ -29,6 +29,10 @@ class Storage(Protocol):
 
     def get_next_user_id(self) -> int: ...
 
+    def get_rates(self) -> dict: ...
+
+    def update_rates(self, rates: dict) -> None: ...
+
 
 class JsonStorage:
     """Store application data in JSON files."""
@@ -200,6 +204,16 @@ class JsonStorage:
         users = self._read_json("users.json", [])
         return max((data["user_id"] for data in users), default=0) + 1
 
+    # Rates cache
+
+    def get_rates(self) -> dict:
+        """Return the complete rates snapshot."""
+        return self._read_json("rates.json", {})
+
+    def update_rates(self, rates: dict) -> None:
+        """Replace the complete rates snapshot."""
+        self._write_json("rates.json", rates)
+
 
 class DatabaseManager:
     """Manage the application storage using Singleton."""
@@ -258,3 +272,9 @@ class DatabaseManager:
 
     def get_next_user_id(self) -> int:
         return self._storage.get_next_user_id()
+
+    def get_rates(self) -> dict:
+        return self._storage.get_rates()
+
+    def update_rates(self, rates: dict) -> None:
+        self._storage.update_rates(rates)
