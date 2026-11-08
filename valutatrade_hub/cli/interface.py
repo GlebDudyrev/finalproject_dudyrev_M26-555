@@ -1,11 +1,17 @@
-
 import argparse
 import shlex
 from typing import NoReturn
 
+from valutatrade_hub.core.currencies import CryptoCurrency, get_currency
 from valutatrade_hub.core.exceptions import ApiRequestError, CurrencyNotFoundError
 from valutatrade_hub.core.models import User
-from valutatrade_hub.core.usecases import UseCaseError, get_rate, login, register
+from valutatrade_hub.core.usecases import (
+    UseCaseError,
+    get_rate,
+    login,
+    register,
+    show_portfolio,
+)
 from valutatrade_hub.infra.database import Storage
 
 
@@ -138,7 +144,27 @@ def execute_command(
                 f"{_format_rate(1 / rate)}"
             )
 
-        case "show-portfolio" | "buy" | "sell":
+        case "show-portfolio":
+            args = parser.parse_args([command, *arguments])
+            wallet_values, total = show_portfolio(
+                current_user,
+                storage,
+                base_currency=args.base,
+                ttl_seconds=rates_ttl_seconds,
+            )
+            print(
+                f"Портфель пользователя '{current_user.username}' (база: {args.base}):"
+            )
+            if not wallet_values:
+                print("В портфеле нет кошельков.")
+            else:
+                for code, balance, value in wallet_values:
+                    digits = 4 if isinstance(get_currency(code), CryptoCurrency) else 2
+                    print(f"- {code}: {balance:.{digits}f}  → {value:.2f} {args.base}")
+                print("---------------------------------")
+                print(f"ИТОГО: {total:,.2f} {args.base}")
+
+        case "buy" | "sell":
             parser.parse_args([command, *arguments])
             print(f"Команда '{command}' пока не реализована.")
 

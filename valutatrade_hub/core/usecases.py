@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from valutatrade_hub.core.currencies import get_currency
+from valutatrade_hub.core.exceptions import CurrencyNotFoundError
 from valutatrade_hub.core.models import Portfolio, User
 from valutatrade_hub.core.utils import EXCHANGE_RATES_USD, generate_salt, hash_password
 from valutatrade_hub.infra.database import Storage
@@ -124,3 +125,50 @@ def get_rate(
     from_rate = 1.0 if from_currency == "USD" else pairs[f"{from_currency}_USD"]["rate"]
     to_rate = 1.0 if to_currency == "USD" else pairs[f"{to_currency}_USD"]["rate"]
     return from_rate / to_rate, updated_at
+
+
+def show_portfolio(
+    user: User | None,
+    storage: Storage,
+    base_currency: str = "USD",
+    ttl_seconds: int = 300,
+) -> tuple[list[tuple[str, float, float]], float]:
+    """Return wallet balances, converted values and the total portfolio value."""
+    if user is None:
+        raise UseCaseError("Сначала выполните login")
+
+    try:
+        get_currency(base_currency)
+    except CurrencyNotFoundError as error:
+        raise UseCaseError(f"Неизвестная базовая валюта '{base_currency}'") from error
+
+    portfolio = storage.get_portfolio(user)
+    if portfolio is None:
+        raise UseCaseError(f"Портфель пользователя '{user.username}' не найден")
+
+    if not portfolio.wallets:
+        return [], 0.0
+
+    currencies = set(portfolio.wallets) | {base_currency}
+    required_pairs = {f"{code}_USD" for code in currencies if code != "USD"}
+    pairs, _ = _get_fresh_rates(storage, required_pairs, ttl_seconds)
+
+    if missing_pairs := required_pairs - pairs.keys():
+        missing_currency = sorted(missing_pairs)[0].removesuffix("_USD")
+        raise UseCaseError(
+            f"Курс {missing_currency}→USD недоступен. Повторите попытку позже."
+        )
+
+    exchange_rates = {"USD": 1.0}
+    exchange_rates.update(
+        {code: pairs[f"{code}_USD"]["rate"] for code in currencies if code != "USD"}
+    )
+
+    base_rate = exchange_rates[base_currency]
+    wallet_values = [
+        (code, wallet.balance, wallet.balance * exchange_rates[code] / base_rate)
+        for code, wallet in portfolio.wallets.items()
+    ]
+    total = portfolio.get_total_value(base_currency, exchange_rates)
+
+    return wallet_values, total
