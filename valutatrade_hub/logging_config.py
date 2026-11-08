@@ -6,6 +6,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 ACTION_LOGGER_NAME = "valutatrade_hub.actions"
+PARSER_LOGGER_NAME = "valutatrade_hub.parser"
 MAX_LOG_BYTES = 1_000_000
 LOG_BACKUP_COUNT = 3
 
@@ -46,7 +47,10 @@ class TextLogFormatter(logging.Formatter):
         parts = [record.levelname, _timestamp(record)]
         if not event:
             parts.append(record.getMessage())
-            return " ".join(parts)
+            formatted = " ".join(parts)
+            if record.exc_info:
+                formatted += "\n" + self.formatException(record.exc_info)
+            return formatted
 
         parts.append(str(event.get("action", record.getMessage())))
         for key, label in TEXT_FIELDS:
@@ -72,23 +76,20 @@ class JsonLogFormatter(logging.Formatter):
             "message": record.getMessage(),
         }
         data.update(_event(record))
+        if record.exc_info:
+            data["exception"] = self.formatException(record.exc_info)
         return json.dumps(data, ensure_ascii=False)
 
 
-def configure_logging(
-    log_path: str | Path,
-    log_format: str = "text",
-    level: int = logging.INFO,
+def _configure_file_logger(
+    name: str,
+    path: Path,
+    log_format: str,
+    level: int,
 ) -> logging.Logger:
-    """Configure the application action logger with size-based rotation."""
-    if log_format not in ("text", "json"):
-        raise ValueError("Формат логирования должен быть 'text' или 'json'")
-
-    file_path = Path(log_path).expanduser()
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-
+    """Create one rotating handler for a dedicated application logger."""
     handler = RotatingFileHandler(
-        file_path,
+        path,
         maxBytes=MAX_LOG_BYTES,
         backupCount=LOG_BACKUP_COUNT,
         encoding="utf-8",
@@ -97,13 +98,33 @@ def configure_logging(
         JsonLogFormatter() if log_format == "json" else TextLogFormatter()
     )
 
-    logger = logging.getLogger(ACTION_LOGGER_NAME)
+    logger = logging.getLogger(name)
     logger.setLevel(level)
     logger.propagate = False
-
     for previous_handler in logger.handlers[:]:
         logger.removeHandler(previous_handler)
         previous_handler.close()
-
     logger.addHandler(handler)
     return logger
+
+
+def configure_logging(
+    log_path: str | Path,
+    log_format: str = "text",
+    level: int = logging.INFO,
+) -> logging.Logger:
+    """Configure separate rotating action and parser logs in one directory."""
+    if log_format not in ("text", "json"):
+        raise ValueError("Формат логирования должен быть 'text' или 'json'")
+
+    action_path = Path(log_path).expanduser()
+    action_path.parent.mkdir(parents=True, exist_ok=True)
+    parser_path = action_path.with_name("parser.log")
+    if action_path == parser_path:
+        raise ValueError("Для действий и Parser Service нужны разные файлы логов")
+
+    action_logger = _configure_file_logger(
+        ACTION_LOGGER_NAME, action_path, log_format, level
+    )
+    _configure_file_logger(PARSER_LOGGER_NAME, parser_path, log_format, level)
+    return action_logger

@@ -46,6 +46,8 @@ class AppSettings:
 
     data_dir: str = field(default_factory=_get_default_data_dir)
     rates_ttl_seconds: int = 300
+    parser_scheduler_enabled: bool = False
+    parser_update_interval_seconds: int = 300
     default_base_currency: str = "USD"
     log_format: str = "text"
     log_path: str = field(default_factory=_get_default_log_path)
@@ -55,6 +57,16 @@ class AppSettings:
         self._normalize_paths()
 
     def _validate_settings(self) -> None:
+        if type(self.parser_scheduler_enabled) is not bool:
+            raise ValueError("parser_scheduler_enabled должен быть булевым значением")
+        if (
+            type(self.parser_update_interval_seconds) is not int
+            or self.parser_update_interval_seconds <= 0
+        ):
+            raise ValueError(
+                "parser_update_interval_seconds должен быть положительным целым числом"
+            )
+
         if type(self.rates_ttl_seconds) is not int or self.rates_ttl_seconds < 0:
             raise ValueError("Некорректное значение rates_ttl_seconds")
 
