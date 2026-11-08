@@ -153,10 +153,13 @@ class Wallet:
 
         self._validate_amount(amount)
 
-        if amount > self.balance:
+        if amount > self.balance and not math.isclose(
+            amount, self.balance, rel_tol=1e-12
+        ):
             raise InsufficientFundsError(self.balance, amount, self.currency_code)
 
-        self.balance -= amount
+        # Avoid negative leftovers caused by floating-point rounding.
+        self.balance = max(0.0, self.balance - amount)
 
     def get_balance_info(self) -> dict[str, str | float]:
         """Return the wallet currency and current balance."""

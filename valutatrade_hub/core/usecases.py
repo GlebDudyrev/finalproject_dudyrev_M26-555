@@ -1,3 +1,4 @@
+import math
 from datetime import UTC, datetime
 
 from valutatrade_hub.core.currencies import get_currency
@@ -172,3 +173,113 @@ def show_portfolio(
     total = portfolio.get_total_value(base_currency, exchange_rates)
 
     return wallet_values, total
+
+
+def _prepare_trade(
+    user: User | None,
+    currency_code: str,
+    amount: float,
+    storage: Storage,
+) -> Portfolio:
+    """Validate a trade and return the user's portfolio."""
+    if user is None:
+        raise UseCaseError("Сначала выполните login")
+
+    get_currency(currency_code)
+    if (
+        isinstance(amount, bool)
+        or not isinstance(amount, (int, float))
+        or not math.isfinite(amount)
+        or amount <= 0
+    ):
+        raise UseCaseError("'amount' должен быть положительным числом")
+
+    if currency_code == "USD":
+        raise UseCaseError("Нельзя покупать или продавать USD за USD")
+
+    portfolio = storage.get_portfolio(user)
+    if portfolio is None:
+        raise UseCaseError(f"Портфель пользователя '{user.username}' не найден")
+
+    return portfolio
+
+
+def _get_trade_rate(currency_code: str, storage: Storage, ttl_seconds: int) -> float:
+    """Get a USD quote with an error message for trading commands."""
+    try:
+        rate, _ = get_rate(currency_code, "USD", storage, ttl_seconds)
+    except UseCaseError as error:
+        raise UseCaseError(
+            f"Не удалось получить курс для {currency_code}→USD"
+        ) from error
+    return rate
+
+
+def buy(
+    user: User | None,
+    currency_code: str,
+    amount: float,
+    storage: Storage,
+    ttl_seconds: int = 300,
+) -> tuple[float, float, float]:
+    """Buy currency using USD and return old balance, new balance, and rate."""
+    portfolio = _prepare_trade(user, currency_code, amount, storage)
+    rate = _get_trade_rate(currency_code, storage, ttl_seconds)
+    cost = amount * rate
+    if not math.isfinite(cost):
+        raise UseCaseError("Стоимость покупки слишком велика")
+
+    try:
+        usd_wallet = portfolio.get_wallet("USD")
+    except KeyError as error:
+        raise UseCaseError("USD-кошелёк не найден") from error
+
+    usd_wallet.withdraw(cost)
+
+    try:
+        wallet = portfolio.get_wallet(currency_code)
+    except KeyError:
+        wallet = portfolio.add_currency(currency_code)
+
+    previous_balance = wallet.balance
+    wallet.deposit(amount)
+    storage.update_portfolio(portfolio)
+
+    return previous_balance, wallet.balance, rate
+
+
+def sell(
+    user: User | None,
+    currency_code: str,
+    amount: float,
+    storage: Storage,
+    ttl_seconds: int = 300,
+) -> tuple[float, float, float]:
+    """Sell currency for USD and return old balance, new balance, and rate."""
+    portfolio = _prepare_trade(user, currency_code, amount, storage)
+
+    try:
+        wallet = portfolio.get_wallet(currency_code)
+    except KeyError as error:
+        raise UseCaseError(
+            f"У вас нет кошелька '{currency_code}'. Добавьте валюту: "
+            "она создаётся автоматически при первой покупке."
+        ) from error
+
+    previous_balance = wallet.balance
+    wallet.withdraw(amount)
+
+    rate = _get_trade_rate(currency_code, storage, ttl_seconds)
+    revenue = amount * rate
+    if not math.isfinite(revenue):
+        raise UseCaseError("Стоимость продажи слишком велика")
+
+    try:
+        usd_wallet = portfolio.get_wallet("USD")
+    except KeyError:
+        usd_wallet = portfolio.add_currency("USD")
+
+    usd_wallet.deposit(revenue)
+    storage.update_portfolio(portfolio)
+
+    return previous_balance, wallet.balance, rate

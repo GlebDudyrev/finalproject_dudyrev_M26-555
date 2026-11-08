@@ -3,13 +3,19 @@ import shlex
 from typing import NoReturn
 
 from valutatrade_hub.core.currencies import CryptoCurrency, get_currency
-from valutatrade_hub.core.exceptions import ApiRequestError, CurrencyNotFoundError
+from valutatrade_hub.core.exceptions import (
+    ApiRequestError,
+    CurrencyNotFoundError,
+    InsufficientFundsError,
+)
 from valutatrade_hub.core.models import User
 from valutatrade_hub.core.usecases import (
     UseCaseError,
+    buy,
     get_rate,
     login,
     register,
+    sell,
     show_portfolio,
 )
 from valutatrade_hub.infra.database import Storage
@@ -164,9 +170,41 @@ def execute_command(
                 print("---------------------------------")
                 print(f"ИТОГО: {total:,.2f} {args.base}")
 
-        case "buy" | "sell":
-            parser.parse_args([command, *arguments])
-            print(f"Команда '{command}' пока не реализована.")
+        case "buy":
+            args = parser.parse_args([command, *arguments])
+            previous, current, rate = buy(
+                current_user, args.currency, args.amount, storage, rates_ttl_seconds
+            )
+            digits = 4 if isinstance(get_currency(args.currency), CryptoCurrency) else 2
+            formatted_rate = f"{rate:.2f}" if rate >= 1 else _format_rate(rate)
+            print(
+                f"Покупка выполнена: {args.amount:.{digits}f} {args.currency} "
+                f"по курсу {formatted_rate} USD/{args.currency}"
+            )
+            print("Изменения в портфеле:")
+            print(
+                f"- {args.currency}: было {previous:.{digits}f} "
+                f"→ стало {current:.{digits}f}"
+            )
+            print(f"Оценочная стоимость покупки: {args.amount * rate:,.2f} USD")
+
+        case "sell":
+            args = parser.parse_args([command, *arguments])
+            previous, current, rate = sell(
+                current_user, args.currency, args.amount, storage, rates_ttl_seconds
+            )
+            digits = 4 if isinstance(get_currency(args.currency), CryptoCurrency) else 2
+            formatted_rate = f"{rate:.2f}" if rate >= 1 else _format_rate(rate)
+            print(
+                f"Продажа выполнена: {args.amount:.{digits}f} {args.currency} "
+                f"по курсу {formatted_rate} USD/{args.currency}"
+            )
+            print("Изменения в портфеле:")
+            print(
+                f"- {args.currency}: было {previous:.{digits}f} "
+                f"→ стало {current:.{digits}f}"
+            )
+            print(f"Оценочная выручка: {args.amount * rate:,.2f} USD")
 
         case "exit":
             parser.parse_args([command, *arguments])
@@ -225,7 +263,7 @@ def run_cli(storage: Storage, rates_ttl_seconds: int = 300) -> None:
             print(error)
             print("Повторите попытку позже или проверьте сеть.")
             continue
-        except UseCaseError as error:
+        except (UseCaseError, InsufficientFundsError) as error:
             print(error)
             continue
 
