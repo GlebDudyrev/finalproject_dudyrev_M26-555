@@ -14,6 +14,7 @@ from valutatrade_hub.core.exceptions import (
 )
 from valutatrade_hub.core.models import User
 from valutatrade_hub.core.usecases import (
+    RatesRefresh,
     UseCaseError,
     buy,
     get_rate,
@@ -124,6 +125,7 @@ def execute_command(
     storage: Storage,
     current_user: User | None,
     rates_ttl_seconds: int = 300,
+    refresh_rates: RatesRefresh | None = None,
 ) -> tuple[bool, User | None]:
     """Execute a command and return the updated CLI state."""
     match command:
@@ -146,6 +148,7 @@ def execute_command(
                 args.to_code,
                 storage,
                 ttl_seconds=rates_ttl_seconds,
+                refresh_rates=refresh_rates,
             )
             print(
                 f"Курс {args.from_code}→{args.to_code}: {_format_rate(rate)} "
@@ -163,6 +166,7 @@ def execute_command(
                 storage,
                 base_currency=args.base,
                 ttl_seconds=rates_ttl_seconds,
+                refresh_rates=refresh_rates,
             )
             print(
                 f"Портфель пользователя '{current_user.username}' (база: {args.base}):"
@@ -179,7 +183,12 @@ def execute_command(
         case "buy":
             args = parser.parse_args([command, *arguments])
             previous, current, rate = buy(
-                current_user, args.currency, args.amount, storage, rates_ttl_seconds
+                current_user,
+                args.currency,
+                args.amount,
+                storage,
+                rates_ttl_seconds,
+                refresh_rates=refresh_rates,
             )
             digits = 4 if isinstance(get_currency(args.currency), CryptoCurrency) else 2
             formatted_rate = f"{rate:.2f}" if rate >= 1 else _format_rate(rate)
@@ -197,7 +206,12 @@ def execute_command(
         case "sell":
             args = parser.parse_args([command, *arguments])
             previous, current, rate = sell(
-                current_user, args.currency, args.amount, storage, rates_ttl_seconds
+                current_user,
+                args.currency,
+                args.amount,
+                storage,
+                rates_ttl_seconds,
+                refresh_rates=refresh_rates,
             )
             digits = 4 if isinstance(get_currency(args.currency), CryptoCurrency) else 2
             formatted_rate = f"{rate:.2f}" if rate >= 1 else _format_rate(rate)
@@ -226,6 +240,7 @@ def run_cli(
     storage: Storage,
     rates_ttl_seconds: int = 300,
     default_base_currency: str = "USD",
+    refresh_rates: RatesRefresh | None = None,
 ) -> None:
     """Run the interactive command-line interface."""
     parser = create_command_parser(default_base_currency)
@@ -261,6 +276,7 @@ def run_cli(
                 storage,
                 current_user,
                 rates_ttl_seconds,
+                refresh_rates,
             )
         except InvalidCommandArguments:
             print(f"Некорректные аргументы команды '{command}'.")

@@ -1,7 +1,15 @@
+
 from valutatrade_hub.cli.interface import run_cli
 from valutatrade_hub.infra.database import DatabaseManager, JsonStorage
 from valutatrade_hub.infra.settings import SettingsLoader
 from valutatrade_hub.logging_config import configure_logging
+from valutatrade_hub.parser_service.api_clients import (
+    CoinGeckoClient,
+    ExchangeRateApiClient,
+)
+from valutatrade_hub.parser_service.config import ParserConfig
+from valutatrade_hub.parser_service.storage import ParserStorage
+from valutatrade_hub.parser_service.updater import RatesUpdater
 
 
 def main() -> None:
@@ -18,10 +26,20 @@ def main() -> None:
 
     database_manager = DatabaseManager(storage)
 
+    parser_config = ParserConfig(data_dir=settings.get("data_dir"))
+    rates_updater = RatesUpdater(
+        clients={
+            "CoinGecko": CoinGeckoClient(parser_config),
+            "ExchangeRate-API": ExchangeRateApiClient(parser_config),
+        },
+        storage=ParserStorage(parser_config),
+    )
+
     run_cli(
         database_manager,
         rates_ttl_seconds=settings.get("rates_ttl_seconds"),
         default_base_currency=settings.get("default_base_currency"),
+        refresh_rates=rates_updater.run_update,
     )
 
 

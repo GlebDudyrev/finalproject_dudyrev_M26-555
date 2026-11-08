@@ -1,16 +1,18 @@
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import cast
 
 from valutatrade_hub.core.currencies import get_currency
-from valutatrade_hub.core.exceptions import CurrencyNotFoundError
+from valutatrade_hub.core.exceptions import ApiRequestError, CurrencyNotFoundError
 from valutatrade_hub.core.models import Portfolio, User
-from valutatrade_hub.core.utils import EXCHANGE_RATES_USD, generate_salt, hash_password
+from valutatrade_hub.core.utils import generate_salt, hash_password
 from valutatrade_hub.decorators import log_action
 from valutatrade_hub.infra.database import Storage
 
 INITIAL_BALANCE_USD = 1_000.0
+
+RatesRefresh = Callable[[], object]
 
 
 class UseCaseError(Exception):
@@ -65,42 +67,95 @@ def login(username: str, password: str, storage: Storage) -> User:
     return user
 
 
+def _valid_rates(
+    snapshot: dict,
+    required_pairs: set[str],
+    *,
+    max_age_seconds: int | None,
+    updated_after: datetime | None = None,
+) -> tuple[dict, datetime] | None:
+    """Validate needed cached quotes and return their oldest timestamp."""
+    pairs = snapshot.get("pairs", {})
+    if not isinstance(pairs, dict):
+        raise ValueError("Некорректная структура rates.json: ожидается 'pairs'")
+
+    now = datetime.now(UTC)
+    timestamps = []
+    for pair in required_pairs:
+        quote = pairs.get(pair)
+        if not isinstance(quote, dict):
+            return None
+        rate = quote.get("rate")
+        if (
+            isinstance(rate, bool)
+            or not isinstance(rate, (int, float))
+            or not math.isfinite(rate)
+            or rate <= 0
+        ):
+            return None
+        source = quote.get("source")
+        if not isinstance(source, str) or not source.strip():
+            return None
+        if source.strip().lower() == "stub":
+            return None  # Historical demo values are not live market quotes.
+
+        timestamp = quote.get("updated_at")
+        if not isinstance(timestamp, str):
+            return None
+        try:
+            updated_at = datetime.fromisoformat(timestamp)
+        except ValueError:
+            return None
+        if updated_at.tzinfo is None or updated_at.utcoffset() is None:
+            return None
+
+        age = (now - updated_at).total_seconds()
+        if age < 0 or (max_age_seconds is not None and age >= max_age_seconds):
+            return None
+        if updated_after is not None and updated_at <= updated_after:
+            return None
+        timestamps.append(updated_at)
+
+    return pairs, min(timestamps)
+
+
 def _get_fresh_rates(
     storage: Storage,
     required_pairs: set[str],
     ttl_seconds: int,
+    refresh_rates: RatesRefresh | None = None,
 ) -> tuple[dict, datetime]:
-    """Return fresh USD quotes, refreshing the snapshot if necessary."""
-    now = datetime.now(UTC)
+    """Read the cache, updating through Parser Service only when necessary."""
+    if type(ttl_seconds) is not int or ttl_seconds < 0:
+        raise ValueError("rates_ttl_seconds должен быть неотрицательным целым числом")
+    if not required_pairs:
+        return {}, datetime.now(UTC)
+
     snapshot = storage.get_rates()
-    pairs = snapshot.get("pairs", {})
+    cached = _valid_rates(
+        snapshot,
+        required_pairs,
+        max_age_seconds=ttl_seconds,
+    )
+    if cached is not None:
+        return cached
 
-    if required_pairs.issubset(pairs):
-        timestamps = [
-            datetime.fromisoformat(pairs[key]["updated_at"]) for key in required_pairs
-        ]
-        timestamps = [
-            value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-            for value in timestamps
-        ]
-        if all(
-            0 <= (now - value).total_seconds() < ttl_seconds for value in timestamps
-        ):
-            return pairs, min(timestamps, default=now)
+    if refresh_rates is None:
+        raise ApiRequestError("Сервис обновления курсов не настроен")
 
-    pairs = {
-        f"{code}_USD": {
-            "rate": rate,
-            "updated_at": now.isoformat(),
-            "source": "Stub",
-        }
-        for code, rate in EXCHANGE_RATES_USD.items()
-        if code != "USD"
-    }
-    if required_pairs.issubset(pairs):
-        storage.update_rates({"pairs": pairs, "last_refresh": now.isoformat()})
-
-    return pairs, now
+    refresh_started = datetime.now(UTC)
+    refresh_rates()
+    refreshed = _valid_rates(
+        storage.get_rates(),
+        required_pairs,
+        max_age_seconds=ttl_seconds if ttl_seconds > 0 else None,
+        updated_after=refresh_started if ttl_seconds == 0 else None,
+    )
+    if refreshed is None:
+        raise UseCaseError(
+            "Нет актуальных котировок для: " + ", ".join(sorted(required_pairs))
+        )
+    return refreshed
 
 
 def get_rate(
@@ -108,6 +163,7 @@ def get_rate(
     to_currency: str,
     storage: Storage,
     ttl_seconds: int = 300,
+    refresh_rates: RatesRefresh | None = None,
 ) -> tuple[float, datetime]:
     """Return the current exchange rate and its quote timestamp."""
     get_currency(from_currency)
@@ -119,7 +175,14 @@ def get_rate(
     required_pairs = {
         f"{code}_USD" for code in (from_currency, to_currency) if code != "USD"
     }
-    pairs, updated_at = _get_fresh_rates(storage, required_pairs, ttl_seconds)
+    try:
+        pairs, updated_at = _get_fresh_rates(
+            storage, required_pairs, ttl_seconds, refresh_rates
+        )
+    except UseCaseError as error:
+        raise UseCaseError(
+            f"Курс {from_currency}→{to_currency} недоступен. Повторите попытку позже."
+        ) from error
 
     if not required_pairs.issubset(pairs):
         raise UseCaseError(
@@ -128,7 +191,10 @@ def get_rate(
 
     from_rate = 1.0 if from_currency == "USD" else pairs[f"{from_currency}_USD"]["rate"]
     to_rate = 1.0 if to_currency == "USD" else pairs[f"{to_currency}_USD"]["rate"]
-    return from_rate / to_rate, updated_at
+    rate = from_rate / to_rate
+    if not math.isfinite(rate) or rate <= 0:
+        raise UseCaseError(f"Курс {from_currency}→{to_currency} некорректен")
+    return rate, updated_at
 
 
 def show_portfolio(
@@ -136,6 +202,7 @@ def show_portfolio(
     storage: Storage,
     base_currency: str = "USD",
     ttl_seconds: int = 300,
+    refresh_rates: RatesRefresh | None = None,
 ) -> tuple[list[tuple[str, float, float]], float]:
     """Return wallet balances, converted values and the total portfolio value."""
     if user is None:
@@ -155,7 +222,7 @@ def show_portfolio(
 
     currencies = set(portfolio.wallets) | {base_currency}
     required_pairs = {f"{code}_USD" for code in currencies if code != "USD"}
-    pairs, _ = _get_fresh_rates(storage, required_pairs, ttl_seconds)
+    pairs, _ = _get_fresh_rates(storage, required_pairs, ttl_seconds, refresh_rates)
 
     if missing_pairs := required_pairs - pairs.keys():
         missing_currency = sorted(missing_pairs)[0].removesuffix("_USD")
@@ -207,10 +274,15 @@ def _prepare_trade(
     return portfolio
 
 
-def _get_trade_rate(currency_code: str, storage: Storage, ttl_seconds: int) -> float:
+def _get_trade_rate(
+    currency_code: str,
+    storage: Storage,
+    ttl_seconds: int,
+    refresh_rates: RatesRefresh | None = None,
+) -> float:
     """Get a USD quote with an error message for trading commands."""
     try:
-        rate, _ = get_rate(currency_code, "USD", storage, ttl_seconds)
+        rate, _ = get_rate(currency_code, "USD", storage, ttl_seconds, refresh_rates)
     except UseCaseError as error:
         raise UseCaseError(
             f"Не удалось получить курс для {currency_code}→USD"
@@ -249,10 +321,11 @@ def buy(
     amount: float,
     storage: Storage,
     ttl_seconds: int = 300,
+    refresh_rates: RatesRefresh | None = None,
 ) -> tuple[float, float, float]:
     """Buy currency using USD and return old balance, new balance, and rate."""
     portfolio = _prepare_trade(user, currency_code, amount, storage)
-    rate = _get_trade_rate(currency_code, storage, ttl_seconds)
+    rate = _get_trade_rate(currency_code, storage, ttl_seconds, refresh_rates)
     cost = amount * rate
     if not math.isfinite(cost):
         raise UseCaseError("Стоимость покупки слишком велика")
@@ -283,6 +356,7 @@ def sell(
     amount: float,
     storage: Storage,
     ttl_seconds: int = 300,
+    refresh_rates: RatesRefresh | None = None,
 ) -> tuple[float, float, float]:
     """Sell currency for USD and return old balance, new balance, and rate."""
     portfolio = _prepare_trade(user, currency_code, amount, storage)
@@ -298,7 +372,7 @@ def sell(
     previous_balance = wallet.balance
     wallet.withdraw(amount)
 
-    rate = _get_trade_rate(currency_code, storage, ttl_seconds)
+    rate = _get_trade_rate(currency_code, storage, ttl_seconds, refresh_rates)
     revenue = amount * rate
     if not math.isfinite(revenue):
         raise UseCaseError("Стоимость продажи слишком велика")
