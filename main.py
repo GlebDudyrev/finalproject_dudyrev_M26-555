@@ -13,7 +13,10 @@ def main() -> None:
 
     database_manager = DatabaseManager(storage)
 
-    run_cli(database_manager)
+    run_cli(
+        database_manager,
+        rates_ttl_seconds=settings.get("rates_ttl_seconds"),
+    )
 
 
 if __name__ == "__main__":

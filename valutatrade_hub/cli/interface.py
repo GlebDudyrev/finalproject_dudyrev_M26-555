@@ -1,9 +1,11 @@
+
 import argparse
 import shlex
 from typing import NoReturn
 
+from valutatrade_hub.core.exceptions import ApiRequestError, CurrencyNotFoundError
 from valutatrade_hub.core.models import User
-from valutatrade_hub.core.usecases import UseCaseError, login, register
+from valutatrade_hub.core.usecases import UseCaseError, get_rate, login, register
 from valutatrade_hub.infra.database import Storage
 
 
@@ -92,12 +94,18 @@ def create_command_parser() -> CommandParser:
     return parser
 
 
+def _format_rate(rate: float) -> str:
+    """Format exchange rates without insignificant trailing zeros."""
+    return f"{rate:.8f}".rstrip("0").rstrip(".")
+
+
 def execute_command(
     command: str,
     arguments: list[str],
     parser: CommandParser,
     storage: Storage,
     current_user: User | None,
+    rates_ttl_seconds: int = 300,
 ) -> tuple[bool, User | None]:
     """Execute a command and return the updated CLI state."""
     match command:
@@ -113,7 +121,24 @@ def execute_command(
             current_user = login(args.username, args.password, storage)
             print(f"Вы вошли как '{current_user.username}'")
 
-        case "show-portfolio" | "buy" | "sell" | "get-rate":
+        case "get-rate":
+            args = parser.parse_args([command, *arguments])
+            rate, updated_at = get_rate(
+                args.from_code,
+                args.to_code,
+                storage,
+                ttl_seconds=rates_ttl_seconds,
+            )
+            print(
+                f"Курс {args.from_code}→{args.to_code}: {_format_rate(rate)} "
+                f"(обновлено: {updated_at:%Y-%m-%d %H:%M:%S})"
+            )
+            print(
+                f"Обратный курс {args.to_code}→{args.from_code}: "
+                f"{_format_rate(1 / rate)}"
+            )
+
+        case "show-portfolio" | "buy" | "sell":
             parser.parse_args([command, *arguments])
             print(f"Команда '{command}' пока не реализована.")
 
@@ -127,7 +152,7 @@ def execute_command(
     return True, current_user
 
 
-def run_cli(storage: Storage) -> None:
+def run_cli(storage: Storage, rates_ttl_seconds: int = 300) -> None:
     """Run the interactive command-line interface."""
     parser = create_command_parser()
 
@@ -161,9 +186,18 @@ def run_cli(storage: Storage) -> None:
                 parser,
                 storage,
                 current_user,
+                rates_ttl_seconds,
             )
         except InvalidCommandArguments:
             print(f"Некорректные аргументы команды '{command}'.")
+            continue
+        except CurrencyNotFoundError as error:
+            print(error)
+            print("Проверьте код валюты: он должен быть в числе поддерживаемых.")
+            continue
+        except ApiRequestError as error:
+            print(error)
+            print("Повторите попытку позже или проверьте сеть.")
             continue
         except UseCaseError as error:
             print(error)
