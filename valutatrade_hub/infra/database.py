@@ -1,7 +1,9 @@
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import ClassVar, Protocol, Self, TypeVar
 
+from valutatrade_hub.core.exceptions import RatesCacheError
 from valutatrade_hub.core.models import Portfolio, User, Wallet
 from valutatrade_hub.infra.utils import read_json_file, write_json_file
 
@@ -207,8 +209,14 @@ class JsonStorage:
     # Rates cache
 
     def get_rates(self) -> dict:
-        """Return the complete rates snapshot."""
-        return self._read_json("rates.json", {})
+        """Read rates without treating malformed JSON as a missing cache."""
+        try:
+            snapshot = self._read_json("rates.json", {})
+            if snapshot and not isinstance(snapshot.get("pairs"), dict):
+                raise ValueError("Некорректная структура 'pairs'")
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as error:
+            raise RatesCacheError("не удалось прочитать корректный JSON") from error
+        return snapshot
 
     def update_rates(self, rates: dict) -> None:
         """Replace the complete rates snapshot."""

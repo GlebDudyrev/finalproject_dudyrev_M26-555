@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from valutatrade_hub.core.exceptions import RatesCacheError
 from valutatrade_hub.parser_service.config import ParserConfig
 
 
@@ -172,21 +173,23 @@ class ParserStorage:
         return len(additions)
 
     def get_rates(self) -> dict[str, Any]:
-        """Read the Core Service snapshot, including its update timestamp."""
-        snapshot = _read_json(
-            self._rates_path,
-            {"pairs": {}, "last_refresh": None},
-        )
-        if snapshot == {}:
-            # An empty file is a valid initial state of the Core Service.
-            return {"pairs": {}, "last_refresh": None}
-        if not isinstance(snapshot, dict) or not isinstance(
-            snapshot.get("pairs"), dict
-        ):
-            raise ValueError("Некорректная структура rates.json")
-        _normalize_quotes(snapshot["pairs"])
-        if snapshot.get("last_refresh") is not None:
-            _utc_timestamp(snapshot["last_refresh"])
+        """Read the latest snapshot; never overwrite malformed existing data."""
+        try:
+            snapshot = _read_json(
+                self._rates_path,
+                {"pairs": {}, "last_refresh": None},
+            )
+            if snapshot == {}:
+                return {"pairs": {}, "last_refresh": None}
+            if not isinstance(snapshot, dict) or not isinstance(
+                snapshot.get("pairs"), dict
+            ):
+                raise ValueError("Некорректная структура rates.json")
+            _normalize_quotes(snapshot["pairs"])
+            if snapshot.get("last_refresh") is not None:
+                _utc_timestamp(snapshot["last_refresh"])
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as error:
+            raise RatesCacheError("не удалось проверить содержимое файла") from error
         return snapshot
 
     def update_rates(

@@ -12,6 +12,7 @@ from valutatrade_hub.core.exceptions import (
     ApiRequestError,
     CurrencyNotFoundError,
     InsufficientFundsError,
+    RatesCacheError,
 )
 from valutatrade_hub.core.models import User
 from valutatrade_hub.core.usecases import (
@@ -355,6 +356,13 @@ def run_cli(
         except ApiRequestError as error:
             print(error)
             print("Повторите попытку позже или проверьте сеть.")
+            continue
+        except RatesCacheError as error:
+            print(error)
+            print(
+                "Сохраните повреждённый rates.json как резервную копию, "
+                "удалите исходный файл и выполните update-rates."
+            )
             continue
         except (UseCaseError, InsufficientFundsError) as error:
             print(error)

@@ -59,6 +59,9 @@ class RatesUpdater:
                 raise ValueError(f"Неизвестный источник котировок: {source}")
             selected = ((source, self._clients[source]),)
 
+        # Do not query providers or modify history when the cache is damaged.
+        self._storage.get_rates()
+
         logger.info("Starting rates update")
         quotes: dict[str, dict[str, Any]] = {}
         errors: dict[str, str] = {}

@@ -4,7 +4,11 @@ from datetime import UTC, datetime
 from typing import cast
 
 from valutatrade_hub.core.currencies import CryptoCurrency, get_currency
-from valutatrade_hub.core.exceptions import ApiRequestError, CurrencyNotFoundError
+from valutatrade_hub.core.exceptions import (
+    ApiRequestError,
+    CurrencyNotFoundError,
+    RatesCacheError,
+)
 from valutatrade_hub.core.models import Portfolio, User
 from valutatrade_hub.core.utils import generate_salt, hash_password
 from valutatrade_hub.decorators import log_action
@@ -77,7 +81,7 @@ def _valid_rates(
     """Validate needed cached quotes and return their oldest timestamp."""
     pairs = snapshot.get("pairs", {})
     if not isinstance(pairs, dict):
-        raise ValueError("Некорректная структура rates.json: ожидается 'pairs'")
+        raise RatesCacheError("поле 'pairs' должно быть объектом JSON")
 
     now = datetime.now(UTC)
     timestamps = []

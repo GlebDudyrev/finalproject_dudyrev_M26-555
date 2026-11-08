@@ -4,7 +4,7 @@ from datetime import datetime
 
 from valutatrade_hub.core.currencies import get_currency
 from valutatrade_hub.core.exceptions import InsufficientFundsError
-from valutatrade_hub.core.utils import EXCHANGE_RATES_USD, generate_salt, hash_password
+from valutatrade_hub.core.utils import generate_salt, hash_password
 
 
 class User:
@@ -222,16 +222,36 @@ class Portfolio:
     def get_total_value(
         self,
         base_currency: str = "USD",
-        exchange_rates: dict[str, float] = EXCHANGE_RATES_USD,
+        exchange_rates: dict[str, float] | None = None,
     ) -> float:
-        """Calculate the total portfolio value in the base currency."""
+        """Calculate portfolio value using explicitly supplied market rates.
 
+        ``exchange_rates`` maps each currency to its value in USD. The USD
+        exchange rate is always 1. No market rates are embedded in the model.
+        """
         get_currency(base_currency)
-        base_rate = exchange_rates[base_currency]
+        if not self._wallets:
+            return 0.0
+
+        if exchange_rates is None:
+            if base_currency == "USD" and set(self._wallets) <= {"USD"}:
+                return sum(wallet.balance for wallet in self._wallets.values())
+            raise ValueError("Для расчёта портфеля необходимы актуальные курсы валют")
+
+        rates = {**exchange_rates, "USD": 1.0}
+        needed = set(self._wallets) | {base_currency}
+        for code in needed:
+            rate = rates.get(code)
+            if (
+                isinstance(rate, bool)
+                or not isinstance(rate, (int, float))
+                or not math.isfinite(rate)
+                or rate <= 0
+            ):
+                raise ValueError(f"Нет корректного курса {code}→USD")
 
         total_usd = sum(
-            wallet.balance * exchange_rates[wallet.currency_code]
+            wallet.balance * rates[wallet.currency_code]
             for wallet in self._wallets.values()
         )
-
-        return total_usd / base_rate
+        return total_usd / rates[base_currency]

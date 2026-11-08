@@ -1,4 +1,3 @@
-
 """Currency types and the registry of supported currencies."""
 
 import math

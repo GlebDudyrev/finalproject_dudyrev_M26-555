@@ -25,3 +25,10 @@ class ApiRequestError(Exception):
     def __init__(self, reason: str) -> None:
         self.reason = reason
         super().__init__(f"Ошибка при обращении к внешнему API: {reason}")
+
+
+class RatesCacheError(Exception):
+    """Indicate a damaged rates cache that must not be used or overwritten."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"Повреждён кеш курсов rates.json: {reason}")

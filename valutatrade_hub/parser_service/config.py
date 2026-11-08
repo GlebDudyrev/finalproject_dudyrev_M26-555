@@ -57,6 +57,10 @@ class ParserConfig:
         normalized_key = key.strip() if key is not None else None
         object.__setattr__(self, "exchange_rate_api_key", normalized_key or None)
 
+        # Core Service stores and combines quotes in the *_USD format.
+        if self.base_currency != "USD":
+            raise ValueError("Parser Service поддерживает базовую валюту только USD")
+
         timeout = self.request_timeout
         if (
             isinstance(timeout, bool)
