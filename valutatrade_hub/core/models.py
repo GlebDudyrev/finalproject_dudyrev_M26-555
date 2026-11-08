@@ -2,6 +2,8 @@ import hmac
 import math
 from datetime import datetime
 
+from valutatrade_hub.core.currencies import get_currency
+from valutatrade_hub.core.exceptions import InsufficientFundsError
 from valutatrade_hub.core.utils import EXCHANGE_RATES_USD, generate_salt, hash_password
 
 
@@ -100,13 +102,10 @@ class Wallet:
         currency_code: str,
         balance: float = 0.0,
     ) -> None:
-        if (
-            not isinstance(currency_code, str)
-            or not currency_code.isupper()
-            or currency_code != currency_code.strip()
-        ):
+        if not isinstance(currency_code, str):
             raise ValueError("Некорректный код валюты")
 
+        get_currency(currency_code)
         self._currency_code = currency_code
         self.balance = balance
 
@@ -155,7 +154,7 @@ class Wallet:
         self._validate_amount(amount)
 
         if amount > self.balance:
-            raise ValueError("Недостаточно средств")
+            raise InsufficientFundsError(self.balance, amount, self.currency_code)
 
         self.balance -= amount
 
@@ -224,9 +223,7 @@ class Portfolio:
     ) -> float:
         """Calculate the total portfolio value in the base currency."""
 
-        if base_currency not in exchange_rates:
-            raise ValueError(f"Неизвестная валюта '{base_currency}'")
-
+        get_currency(base_currency)
         base_rate = exchange_rates[base_currency]
 
         total_usd = sum(
