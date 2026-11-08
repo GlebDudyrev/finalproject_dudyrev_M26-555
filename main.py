@@ -1,4 +1,3 @@
-
 from valutatrade_hub.cli.interface import run_cli
 from valutatrade_hub.infra.database import DatabaseManager, JsonStorage
 from valutatrade_hub.infra.settings import SettingsLoader
@@ -40,6 +39,7 @@ def main() -> None:
         rates_ttl_seconds=settings.get("rates_ttl_seconds"),
         default_base_currency=settings.get("default_base_currency"),
         refresh_rates=rates_updater.run_update,
+        update_rates=rates_updater.run_update,
     )
 
 

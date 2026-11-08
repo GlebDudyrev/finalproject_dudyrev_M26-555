@@ -3,7 +3,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import cast
 
-from valutatrade_hub.core.currencies import get_currency
+from valutatrade_hub.core.currencies import CryptoCurrency, get_currency
 from valutatrade_hub.core.exceptions import ApiRequestError, CurrencyNotFoundError
 from valutatrade_hub.core.models import Portfolio, User
 from valutatrade_hub.core.utils import generate_salt, hash_password
@@ -195,6 +195,106 @@ def get_rate(
     if not math.isfinite(rate) or rate <= 0:
         raise UseCaseError(f"Курс {from_currency}→{to_currency} некорректен")
     return rate, updated_at
+
+
+def show_rates(
+    storage: Storage,
+    currency_code: str | None = None,
+    top: int | None = None,
+    base_currency: str = "USD",
+) -> tuple[list[tuple[str, float, str]], str | None]:
+    """Return filtered, converted quotes from the local snapshot only.
+
+    Each row contains the displayed pair, its rate and the original quote
+    timestamp. This command does not refresh stale rates through the API.
+    """
+    get_currency(base_currency)
+    if top is not None and (type(top) is not int or top <= 0):
+        raise UseCaseError("'top' должен быть положительным целым числом")
+
+    snapshot = storage.get_rates()
+    pairs = snapshot.get("pairs")
+    if not pairs and (pairs is None or isinstance(pairs, dict)):
+        raise UseCaseError(
+            "Локальный кеш курсов пуст. Выполните 'update-rates', чтобы загрузить данные."
+        )
+    if not isinstance(pairs, dict):
+        raise UseCaseError("Некорректная структура кеша курсов")
+
+    # All Parser Service quotes are normalized against USD. Keep the
+    # conversion in the use case; the CLI only formats the returned rows.
+    usd_rates: dict[str, tuple[float, str]] = {}
+    for pair, quote in pairs.items():
+        if not isinstance(pair, str) or pair.count("_") != 1:
+            raise UseCaseError("Некорректная валютная пара в кеше")
+        code, to_code = pair.split("_")
+        if to_code != "USD":
+            continue
+        get_currency(code)
+        if not isinstance(quote, dict):
+            raise UseCaseError(f"Некорректная котировка в кеше: {pair}")
+        rate = quote.get("rate")
+        updated_at = quote.get("updated_at")
+        source = quote.get("source")
+        if (
+            isinstance(rate, bool)
+            or not isinstance(rate, (int, float))
+            or not math.isfinite(rate)
+            or rate <= 0
+            or not isinstance(updated_at, str)
+            or not isinstance(source, str)
+            or not source.strip()
+        ):
+            raise UseCaseError(f"Некорректная котировка в кеше: {pair}")
+        try:
+            timestamp = datetime.fromisoformat(updated_at)
+        except ValueError as error:
+            raise UseCaseError(f"Некорректная дата котировки: {pair}") from error
+        if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+            raise UseCaseError(f"Некорректная дата котировки: {pair}")
+        usd_rates[code] = (float(rate), updated_at)
+
+    if currency_code is not None and currency_code not in usd_rates:
+        raise UseCaseError(f"Курс для '{currency_code}' не найден в кеше.")
+
+    base_rate = 1.0
+    if base_currency != "USD":
+        if base_currency not in usd_rates:
+            raise UseCaseError(f"Курс {base_currency}→USD не найден в кеше.")
+        base_rate = usd_rates[base_currency][0]
+
+    rows = []
+    for code, (rate, updated_at) in usd_rates.items():
+        if currency_code is not None and code != currency_code:
+            continue
+        if top is not None and not isinstance(get_currency(code), CryptoCurrency):
+            continue
+        converted_rate = rate / base_rate
+        if not math.isfinite(converted_rate) or converted_rate <= 0:
+            raise UseCaseError(f"Некорректный курс {code}→{base_currency}")
+        rows.append((f"{code}_{base_currency}", converted_rate, updated_at))
+
+    if not rows:
+        raise UseCaseError("В кеше нет котировок по выбранным фильтрам.")
+
+    if top is None:
+        rows.sort(key=lambda entry: entry[0])
+    else:
+        rows.sort(key=lambda entry: (-entry[1], entry[0]))
+        rows = rows[:top]
+
+    last_refresh = snapshot.get("last_refresh")
+    if last_refresh is not None:
+        if not isinstance(last_refresh, str):
+            raise UseCaseError("Некорректная дата обновления кеша")
+        try:
+            refreshed_at = datetime.fromisoformat(last_refresh)
+        except ValueError as error:
+            raise UseCaseError("Некорректная дата обновления кеша") from error
+        if refreshed_at.tzinfo is None or refreshed_at.utcoffset() is None:
+            raise UseCaseError("Некорректная дата обновления кеша")
+
+    return rows, last_refresh
 
 
 def show_portfolio(

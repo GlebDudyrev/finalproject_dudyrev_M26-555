@@ -1,5 +1,6 @@
 import argparse
 import shlex
+from collections.abc import Callable
 from typing import NoReturn
 
 from valutatrade_hub.core.currencies import (
@@ -22,8 +23,13 @@ from valutatrade_hub.core.usecases import (
     register,
     sell,
     show_portfolio,
+    show_rates,
 )
 from valutatrade_hub.infra.database import Storage
+from valutatrade_hub.parser_service.updater import UpdateResult
+
+SOURCE_NAMES = {"coingecko": "CoinGecko", "exchangerate": "ExchangeRate-API"}
+RatesUpdate = Callable[[str | None], UpdateResult]
 
 
 class InvalidCommandArguments(Exception):
@@ -60,6 +66,19 @@ def _add_rate_arguments(parser: argparse.ArgumentParser) -> None:
     """Add exchange-rate arguments."""
     parser.add_argument("--from", dest="from_code", required=True)
     parser.add_argument("--to", dest="to_code", required=True)
+
+
+def _positive_int(value: str) -> int:
+    """Parse a strictly positive count for the --top option."""
+    try:
+        number = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "Ожидается положительное целое число"
+        ) from error
+    if number <= 0:
+        raise argparse.ArgumentTypeError("Ожидается положительное целое число")
+    return number
 
 
 def create_command_parser(default_base_currency: str = "USD") -> CommandParser:
@@ -105,6 +124,22 @@ def create_command_parser(default_base_currency: str = "USD") -> CommandParser:
     )
     _add_rate_arguments(rate_parser)
 
+    update_parser = commands.add_parser(
+        "update-rates",
+        add_help=False,
+        allow_abbrev=False,
+    )
+    update_parser.add_argument("--source", choices=tuple(SOURCE_NAMES))
+
+    show_rates_parser = commands.add_parser(
+        "show-rates",
+        add_help=False,
+        allow_abbrev=False,
+    )
+    show_rates_parser.add_argument("--currency")
+    show_rates_parser.add_argument("--top", type=_positive_int)
+    show_rates_parser.add_argument("--base", default=default_base_currency)
+
     commands.add_parser(
         "exit",
         add_help=False,
@@ -126,6 +161,7 @@ def execute_command(
     current_user: User | None,
     rates_ttl_seconds: int = 300,
     refresh_rates: RatesRefresh | None = None,
+    update_rates: RatesUpdate | None = None,
 ) -> tuple[bool, User | None]:
     """Execute a command and return the updated CLI state."""
     match command:
@@ -158,6 +194,35 @@ def execute_command(
                 f"Обратный курс {args.to_code}→{args.from_code}: "
                 f"{_format_rate(1 / rate)}"
             )
+
+        case "update-rates":
+            args = parser.parse_args([command, *arguments])
+            if update_rates is None:
+                raise UseCaseError("Сервис обновления курсов не настроен")
+            source = SOURCE_NAMES[args.source] if args.source is not None else None
+            result = update_rates(source)
+            if result.errors:
+                print("Обновление завершено с ошибками:")
+                for provider, reason in result.errors.items():
+                    print(f"- {provider}: {reason}")
+            else:
+                print("Обновление курсов завершено успешно.")
+            print(f"Получено котировок: {result.fetched}; обновлено: {result.updated}.")
+            print(f"Добавлено измерений в историю: {result.history_added}.")
+            if result.last_refresh is not None:
+                print(f"Последнее обновление: {result.last_refresh}")
+
+        case "show-rates":
+            args = parser.parse_args([command, *arguments])
+            rows, last_refresh = show_rates(
+                storage,
+                currency_code=args.currency,
+                top=args.top,
+                base_currency=args.base,
+            )
+            print(f"Rates from cache (updated at {last_refresh or 'не указано'}):")
+            for pair, rate, updated_at in rows:
+                print(f"- {pair}: {_format_rate(rate)} (обновлено: {updated_at})")
 
         case "show-portfolio":
             args = parser.parse_args([command, *arguments])
@@ -241,6 +306,7 @@ def run_cli(
     rates_ttl_seconds: int = 300,
     default_base_currency: str = "USD",
     refresh_rates: RatesRefresh | None = None,
+    update_rates: RatesUpdate | None = None,
 ) -> None:
     """Run the interactive command-line interface."""
     parser = create_command_parser(default_base_currency)
@@ -277,6 +343,7 @@ def run_cli(
                 current_user,
                 rates_ttl_seconds,
                 refresh_rates,
+                update_rates,
             )
         except InvalidCommandArguments:
             print(f"Некорректные аргументы команды '{command}'.")
