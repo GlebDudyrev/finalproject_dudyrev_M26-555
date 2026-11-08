@@ -1,7 +1,8 @@
 from datetime import UTC, datetime
 
+from valutatrade_hub.core.currencies import get_currency
 from valutatrade_hub.core.models import Portfolio, User
-from valutatrade_hub.core.utils import generate_salt, hash_password
+from valutatrade_hub.core.utils import EXCHANGE_RATES_USD, generate_salt, hash_password
 from valutatrade_hub.infra.database import Storage
 
 INITIAL_BALANCE_USD = 1_000.0
@@ -42,7 +43,6 @@ def register(username: str, password: str, storage: Storage) -> User:
     return user
 
 
-
 def login(username: str, password: str, storage: Storage) -> User:
     """Authenticate a user and return their account."""
     if not isinstance(username, str) or not username.strip():
@@ -58,3 +58,69 @@ def login(username: str, password: str, storage: Storage) -> User:
         raise UseCaseError("Неверный пароль")
 
     return user
+
+
+def _get_fresh_rates(
+    storage: Storage,
+    required_pairs: set[str],
+    ttl_seconds: int,
+) -> tuple[dict, datetime]:
+    """Return fresh USD quotes, refreshing the snapshot if necessary."""
+    now = datetime.now(UTC)
+    snapshot = storage.get_rates()
+    pairs = snapshot.get("pairs", {})
+
+    if required_pairs.issubset(pairs):
+        timestamps = [
+            datetime.fromisoformat(pairs[key]["updated_at"]) for key in required_pairs
+        ]
+        timestamps = [
+            value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+            for value in timestamps
+        ]
+        if all(
+            0 <= (now - value).total_seconds() < ttl_seconds for value in timestamps
+        ):
+            return pairs, min(timestamps, default=now)
+
+    pairs = {
+        f"{code}_USD": {
+            "rate": rate,
+            "updated_at": now.isoformat(),
+            "source": "Stub",
+        }
+        for code, rate in EXCHANGE_RATES_USD.items()
+        if code != "USD"
+    }
+    if required_pairs.issubset(pairs):
+        storage.update_rates({"pairs": pairs, "last_refresh": now.isoformat()})
+
+    return pairs, now
+
+
+def get_rate(
+    from_currency: str,
+    to_currency: str,
+    storage: Storage,
+    ttl_seconds: int = 300,
+) -> tuple[float, datetime]:
+    """Return the current exchange rate and its quote timestamp."""
+    get_currency(from_currency)
+    get_currency(to_currency)
+
+    if from_currency == to_currency:
+        return 1.0, datetime.now(UTC)
+
+    required_pairs = {
+        f"{code}_USD" for code in (from_currency, to_currency) if code != "USD"
+    }
+    pairs, updated_at = _get_fresh_rates(storage, required_pairs, ttl_seconds)
+
+    if not required_pairs.issubset(pairs):
+        raise UseCaseError(
+            f"Курс {from_currency}→{to_currency} недоступен. Повторите попытку позже."
+        )
+
+    from_rate = 1.0 if from_currency == "USD" else pairs[f"{from_currency}_USD"]["rate"]
+    to_rate = 1.0 if to_currency == "USD" else pairs[f"{to_currency}_USD"]["rate"]
+    return from_rate / to_rate, updated_at
