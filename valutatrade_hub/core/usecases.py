@@ -1,10 +1,13 @@
 import math
+from collections.abc import Mapping
 from datetime import UTC, datetime
+from typing import cast
 
 from valutatrade_hub.core.currencies import get_currency
 from valutatrade_hub.core.exceptions import CurrencyNotFoundError
 from valutatrade_hub.core.models import Portfolio, User
 from valutatrade_hub.core.utils import EXCHANGE_RATES_USD, generate_salt, hash_password
+from valutatrade_hub.decorators import log_action
 from valutatrade_hub.infra.database import Storage
 
 INITIAL_BALANCE_USD = 1_000.0
@@ -215,6 +218,31 @@ def _get_trade_rate(currency_code: str, storage: Storage, ttl_seconds: int) -> f
     return rate
 
 
+def _trade_log_context(
+    arguments: Mapping[str, object],
+    result: object | None,
+    verbose: bool,
+) -> dict[str, object]:
+    """Describe a trade without exposing storage or other call arguments."""
+    user = arguments.get("user")
+    context: dict[str, object] = {
+        "username": user.username if isinstance(user, User) else None,
+        "currency_code": arguments.get("currency_code"),
+        "amount": arguments.get("amount"),
+        "base": "USD",
+    }
+    if result is not None:
+        previous_balance, current_balance, rate = cast(
+            tuple[float, float, float], result
+        )
+        context["rate"] = rate
+        if verbose:
+            context["before_balance"] = previous_balance
+            context["after_balance"] = current_balance
+    return context
+
+
+@log_action(context=_trade_log_context, verbose=True)
 def buy(
     user: User | None,
     currency_code: str,
@@ -248,6 +276,7 @@ def buy(
     return previous_balance, wallet.balance, rate
 
 
+@log_action(context=_trade_log_context, verbose=True)
 def sell(
     user: User | None,
     currency_code: str,
