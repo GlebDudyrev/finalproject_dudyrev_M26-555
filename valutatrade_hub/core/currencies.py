@@ -98,3 +98,8 @@ def get_currency(code: str) -> Currency:
         return _CURRENCIES[code]
     except KeyError as error:
         raise CurrencyNotFoundError(code) from error
+
+
+def get_supported_currency_codes() -> tuple[str, ...]:
+    """Return the supported currency codes in alphabetical order."""
+    return tuple(sorted(_CURRENCIES))

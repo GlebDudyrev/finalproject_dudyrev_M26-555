@@ -2,7 +2,11 @@ import argparse
 import shlex
 from typing import NoReturn
 
-from valutatrade_hub.core.currencies import CryptoCurrency, get_currency
+from valutatrade_hub.core.currencies import (
+    CryptoCurrency,
+    get_currency,
+    get_supported_currency_codes,
+)
 from valutatrade_hub.core.exceptions import (
     ApiRequestError,
     CurrencyNotFoundError,
@@ -44,9 +48,11 @@ def _add_trade_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--amount", required=True, type=float)
 
 
-def _add_portfolio_arguments(parser: argparse.ArgumentParser) -> None:
+def _add_portfolio_arguments(
+    parser: argparse.ArgumentParser, default_base_currency: str
+) -> None:
     """Add portfolio arguments."""
-    parser.add_argument("--base", default="USD")
+    parser.add_argument("--base", default=default_base_currency)
 
 
 def _add_rate_arguments(parser: argparse.ArgumentParser) -> None:
@@ -55,7 +61,7 @@ def _add_rate_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--to", dest="to_code", required=True)
 
 
-def create_command_parser() -> CommandParser:
+def create_command_parser(default_base_currency: str = "USD") -> CommandParser:
     """Create the application command parser."""
     parser = CommandParser(
         prog="valutatrade",
@@ -89,7 +95,7 @@ def create_command_parser() -> CommandParser:
         add_help=False,
         allow_abbrev=False,
     )
-    _add_portfolio_arguments(portfolio_parser)
+    _add_portfolio_arguments(portfolio_parser, default_base_currency)
 
     rate_parser = commands.add_parser(
         "get-rate",
@@ -216,9 +222,13 @@ def execute_command(
     return True, current_user
 
 
-def run_cli(storage: Storage, rates_ttl_seconds: int = 300) -> None:
+def run_cli(
+    storage: Storage,
+    rates_ttl_seconds: int = 300,
+    default_base_currency: str = "USD",
+) -> None:
     """Run the interactive command-line interface."""
-    parser = create_command_parser()
+    parser = create_command_parser(default_base_currency)
 
     current_user: User | None = None
 
@@ -257,7 +267,7 @@ def run_cli(storage: Storage, rates_ttl_seconds: int = 300) -> None:
             continue
         except CurrencyNotFoundError as error:
             print(error)
-            print("Проверьте код валюты: он должен быть в числе поддерживаемых.")
+            print("Поддерживаемые валюты: " + ", ".join(get_supported_currency_codes()))
             continue
         except ApiRequestError as error:
             print(error)
